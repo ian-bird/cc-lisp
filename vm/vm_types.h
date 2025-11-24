@@ -1,104 +1,86 @@
+#ifndef VM_TYPES_H
+#define VM_TYPES_H
+
+typedef struct StackFrame {
+  Instruction *returnAddr;
+  int numArgs;
+  Value data[]; // the first numArgs values are set by the caller and constitute arguments pased to the function.
+                // the remaining values are local arguments. This is a fixed number and the fn binding should contain
+                // the info.
+} StackFrame;
+
+typedef struct Stack {
+  int numFrames;
+  int capacity;
+  StackFrame *frames[]; // array of pointers to frames
+} Stack;
+
+typedef enum ValueType {number, symbol, pair, boolean, character, procedure, promise, null} ValueType;
+
+typedef struct Value {
+  ValueType type;
+} Value;
+
 typedef int Symbol;
 
 typedef struct Binding {
   Symbol name;
-  Reg val;
+  Value value;
 } Binding;
 
-typedef struct Env {
-  Binding *bindings;
+typedef struct EnvFrame {
   int numBindings;
   int capacity;
-} Env;
+  Binding bindings[];
+} EnvFrame;
 
-typedef enum InstructionType {
-  jal,
-  typChk,
-  assert,
-  arityChk,
-  lookup,
-  push,
-  pop,
-  add,
-  sub,
-  mult,
-  divide,
-  cond,
-  cons,
-  car,
-  load,
-  move,
-  cmp,
-  set,
-  cdr,
-  ret
-} InstructionType;
+typedef struct Environment {
+  int numFrames;
+  int capacity;
+  EnvFrame *frames[];
+} Environment;
 
-#define RESULT_I 0
-#define CONT_I 1
+typedef struct Function {
+  Environment funEnv; // using deep binding.
+  Environment varEnv; 
+  int numFixedArgs;
+  int hasFinalVarArg;
+  Instruction *returnAddress;
+  Instruction entryPoint[];
+} Function;
 
-typedef int RegI;
+typedef struct Continuation {
+  Stack s;
+} Continuation;
+
+typedef enum InstructionType {varLookup, fnLookup, ret, load, move, addArg, arity, type, gosub, unless, jmp} InstructionType;
+
+typedef int Register;
 
 typedef struct Instruction {
   InstructionType type;
   union {
-    RegI jal, push, pop, assert, lookup, car, cdr;
+    Register varLookup, fnLookup, move, addArg, arity, goSub;
+    Value load;
     struct {
-      RegI l;
-      Reg v;
-    } load;
+      Register pred;
+      int where;
+    } unless;
     struct {
-      RegI l;
-      RegI r;
-    } arityChk, typChk, move, add, sub, mult, div, cons, cmp, set;
-    struct {
-      RegI pred;
-      RegI consq;
-      RegI alt;
-    } cond;
+      Register what;
+      ValueType expected;
+    } type;
+    int jmp;
   } val;
 } Instruction;
 
-typedef enum ValueType {
-  number,
-  proc,
-  symbol,
-  string,
-  pair,
-  boolean,
-  null,
-  err
-} ValueType;
-
-typedef struct Reg {
-  ValueType type;
-  Value *val;
-} Reg;
-
-typedef union Value {
-  int number;
-  struct {
-    Reg *env;
-    Instruction *code;
-  } proc;
-  Symbol symbol;
-  int boolean;
-  char *string;
-  struct {
-    Reg l;
-    Reg r;
-  } pair;
-} Value;
-
 typedef struct Machine {
-  int numRegs;
-  int regCap;
-  Reg *regs;
-  Instruction *pc;
-  Env *globalEnv;
-  int numArgs;
-  int argsCap;
-  Reg *args;
+  Stack s;
+  Value result;
+  Instruction *ip;
+  int numRegisters;
+  int registerCapacity;
+  Value registers[];
 } Machine;
-  
-  
+
+#endif

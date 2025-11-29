@@ -1,7 +1,9 @@
 #include "vm_types.h"
-
+#include "gc.h"
+#include "globals.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #define INITIAL_ALLOC 8
 #define SYMBOL_NOT_FOUND 1
@@ -9,7 +11,6 @@
 #define UNRECOGNIZED_INSTRUCTION 3
 #define UNRECOGNIZED_FUNCALL 4
 
-int **onErr = NULL;
 
 Value lookup(Environment env, Symbol s) 
 {
@@ -26,16 +27,14 @@ Value lookup(Environment env, Symbol s)
     }
   }
 
-  longjump(*onErr, SYMBOL_NOT_FOUND);
+  longjmp(onErr, SYMBOL_NOT_FOUND);
 }
-
 
 #define REALLOC_FAM(old, structType, arrType, numMembers) \
   (structType *)gc_realloc(old, sizeof(structType) + sizeof(arrType) * ((numMembers) - 1))
 
 #define ALLOC_FAM(structType, arrType, numMembers) \
-  (structType *)gc_alloc(sizeof(structType) + sizeof(arrType) * ((numMembers) - 1))
-
+  (structType *)gc_malloc(sizeof(structType) + sizeof(arrType) * ((numMembers) - 1))
 
 Values *appendValue(Values *vs, Value v)
 {
@@ -58,7 +57,7 @@ Values *appendValue(Values *vs, Value v)
 
 Value toList(Value *values, int numValues)
 {
-  Value *memBlock = gc_alloc(sizeof(Value) * (numValues * 2 + 1));
+  Value *memBlock = gc_malloc(sizeof(Value) * (numValues * 2 + 1));
   memBlock[0].type = null;
   for(int i = 0; i < numValues; i++)
   {
@@ -71,13 +70,13 @@ Value toList(Value *values, int numValues)
   return memBlock[0];
 }
 
-Function *apply(Function *f, Values *vs)
+Function *extend(Function *f, Values *vs)
 {
   Function *result = f;
   result->funEnv = ALLOC_FAM(Environment, Frame, result->funEnv->numFrames + 1);
 
   int capacity = f->numFixedArgs + f->hasFinalVarArg ? 1 : 0;
-  Frame nextFrame = (Frame){capacity, capacity, gc_alloc(sizeof(Binding) * capacity)};
+  Frame nextFrame = (Frame){capacity, capacity, gc_malloc(sizeof(Binding) * capacity)};
 
   int i = 0;
   for(; i < result->numFixedArgs; i++)
@@ -93,6 +92,8 @@ Function *apply(Function *f, Values *vs)
     nextFrame.bindings[i].name.type = dynamic;
     nextFrame.bindings[i].value = toList(vs->values + i, vs->numValues - i);
   }
+
+  return result;
 }
 
 Value run(Value *initialArgs, int numInitialArgs, Function *toExecute) 
@@ -102,6 +103,14 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
     s.current = appendValue(s.current, initialArgs[i]);
   }
   s.future = NULL;
+
+  Values *vs = ALLOC_FAM(Values, Value, numInitialArgs > 0 ? numInitialArgs : 1);
+  vs->numValues = numInitialArgs;
+  vs->valueCapacity = numInitialArgs;
+  memcpy(vs->values, initialArgs, numInitialArgs * sizeof(Value));
+
+  s.fn = extend(toExecute, vs);
+  s.instruction = 0;
 
   Continuation *k = gc_malloc(sizeof(Continuation));
    *k = (Continuation){(State){}, NULL};
@@ -126,10 +135,13 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
       // we've reached the end of this function.
       // all we can pass on is the result value.
     case ret:
-      Value result = s.result;
-      s = k->nextState;
-      s.result = result;
-      k = k->next;
+      {
+        Value result = s.result;
+        s = k->nextState;
+        s.result = result;
+        k = k->next;
+      }
+      break;
 
       // load takes a literal value (the argument in the instruction)
       // and moves it into the result register.
@@ -151,11 +163,13 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
       // it looks at the fucntion in the register and checks if the number of arguments
       // in the nextFrame is sufficient.
     case arity:
-      Procedure proc = s.current->values[thisInstr.val.arity].val.procedure;
-      int numExpected = proc.type == continuation ? 1 : proc.val.function.numFixedArgs;
-      int isVarArg = proc.type == continuation ? 1 : proc.val.function.hasFinalVarArg;
-      if(!(s.future->numValues == numExpected || (s.future->numValues > numExpected && isVarArg)))
-        longjmp(*onErr, FAILED_ARITY_CHECK);
+      {
+        Procedure proc = s.current->values[thisInstr.val.arity].val.procedure;
+        int numExpected = proc.type == continuation ? 1 : proc.val.function->numFixedArgs;
+        int isVarArg = proc.type == continuation ? 1 : proc.val.function->hasFinalVarArg;
+        if(!(s.future->numValues == numExpected || (s.future->numValues > numExpected && isVarArg)))
+          longjmp(onErr, FAILED_ARITY_CHECK);
+      }
       break;
 
       // goSub does all the work of going into a function or into a continuation.
@@ -164,42 +178,48 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
       // it does the job of building the "toExecute" function, which contains both environments,
       // as well as saving all the stateful parts of the machine and loading the new values for that.
     case gosub:
-      Procedure proc = s.current->values[thisInstr.val.goSub].val.procedure;
-      switch(proc.type) 
       {
-        // we extend the continuation with everything left to do in this function,
-        // and then we load the new state and apply the function.
-      case funcall:
-        // creating the future state to return to
-        s.current = s.future;
-        s.future = NULL;
-        s.instruction++;
+        Procedure proc = s.current->values[thisInstr.val.goSub].val.procedure;
+        switch(proc.type) 
+        {
+          // we extend the continuation with everything left to do in this function,
+          // and then we load the new state and apply the function.
+        case funcall:
+          {
+            // creating the future state to return to
+            s.current = s.future;
+            s.future = NULL;
+            s.instruction++;
 
-        // saving it in the continuation
-        Continuation *next = (Continuation *)gc_malloc(sizeof(Continuation));
-        *next = (Continuation){s, k};
-        k = next;
+            // saving it in the continuation
+            Continuation *next = (Continuation *)gc_malloc(sizeof(Continuation));
+            *next = (Continuation){s, k};
+            k = next;
 
-        // now go eval the function
-        s.fn = apply(&proc.val.function, s.current);
-        s.instruction = 0;
-        break;
+            // now go eval the function
+            s.fn = extend(proc.val.function, s.current);
+            s.instruction = 0;
+          }
+          break;
 
-        // follow the cont in the procedure. Current stack is discarded.
-      case continuation:
-        Value result = s.future->values[0];
-        k = proc.val.cont.next;
-        s = proc.val.cont.nextState;
-        s.result = result;
-        break;
+          // follow the cont in the procedure. Current stack is discarded.
+        case continuation:
+          {
+            Value result = s.future->values[0];
+            k = proc.val.cont->next;
+            s = proc.val.cont->nextState;
+            s.result = result;
+          }
+          break;
 
-        // we need to load the new state and apply the function, but we keep the current cont.
-      case tailcall:
-        s = (State){s.future, NULL, (Value){}, apply(&proc.val.function, s.current), 0};
-        break;
+          // we need to load the new state and apply the function, but we keep the current cont.
+        case tailcall:
+          s = (State){s.future, NULL, (Value){}, extend(proc.val.function, s.current), 0};
+          break;
 
-        default:
-        longjmp(*onErr, UNRECOGNIZED_FUNCALL);
+          default:
+          longjmp(onErr, UNRECOGNIZED_FUNCALL);
+        }
       }
       continue;
 
@@ -216,16 +236,18 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
       continue;
 
     case makeClosure:
-      Procedure proc = s.current->values[thisInstr.val.makeClosure].val.procedure;
-      if(proc.type == continuation)
-        break;
+      {
+        Procedure proc = s.current->values[thisInstr.val.makeClosure].val.procedure;
+        if(proc.type == continuation)
+          break;
 
-      proc.val.function.funEnv = s.fn->funEnv;
-      proc.val.function.varEnv = s.fn->varEnv;        
+        proc.val.function->funEnv = s.fn->funEnv;
+        proc.val.function->varEnv = s.fn->varEnv;
+      }
       break;
 
     default:
-      longjmp(*onErr, UNRECOGNIZED_INSTRUCTION);
+      longjmp(onErr, UNRECOGNIZED_INSTRUCTION);
     }
 
     s.instruction++;

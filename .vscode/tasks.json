@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "make build", // Name your build task
+            "type": "shell",
+            "command": "make", // The command to run your Makefile (assumes "make" in the default target)
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$gcc" // Use appropriate problem matcher for your compiler
+            ],
+            "detail": "Runs the make command to build the project"
+        }
+    ]
+}

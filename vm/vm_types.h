@@ -1,13 +1,28 @@
 #ifndef VM_TYPES_H
 #define VM_TYPES_H
 
+typedef enum SymbolType {lexical, dynamic} SymbolType;
+
+typedef struct Symbol {
+  SymbolType type;
+  union {
+    int dynamic;
+    struct {
+      int frameNumber, bindingNumber;
+    } lexical;
+  } val;
+} Symbol;
+
 typedef enum ProcedureType {tailcall, funcall, continuation} ProcedureType;
+
+struct Function;
+struct Continuation;
 
 typedef struct Procedure {
   ProcedureType type;
   union {
-    Function function;
-    Continuation cont;
+    struct Function *function;
+    struct Continuation *cont;
   } val;
 } Procedure;
 
@@ -20,23 +35,11 @@ typedef struct Value {
     Procedure procedure;
     int boolean;
     struct {
-      Value *car;
-      Value *cdr;
+      struct Value *car;
+      struct Value *cdr;
     } pair;
   } val;
 } Value;
-
-typedef enum SymbolType {lexical, dynamic} SymbolType;
-
-typedef struct Symbol {
-  SymbolType type;
-  union {
-    int dynamic;
-    struct {
-      int frameNumber, bindingNumber;
-    } lexical;
-  } val;
-} Symbol;
 
 typedef struct Binding {
   Symbol name;
@@ -53,15 +56,6 @@ typedef struct Environment {
   int numFrames;
   Frame *frames[];
 } Environment;
-
-typedef struct Function {
-  Environment *funEnv; // using deep binding.
-  Environment *varEnv;
-  int *argNames; // length is num fixed args (+1 if hasFinalVarArg is 1) 
-  int numFixedArgs;
-  int hasFinalVarArg;
-  Instruction instructions[];
-} Function;
 
 typedef enum InstructionType {varLookup, fnLookup, ret, load, move, addArg, arity, type, gosub, unless, jmp, makeClosure} InstructionType;
 
@@ -84,6 +78,14 @@ typedef struct Instruction {
   } val;
 } Instruction;
 
+typedef struct Function {
+  Environment *funEnv; // using deep binding.
+  Environment *varEnv;
+  int *argNames; // length is num fixed args (+1 if hasFinalVarArg is 1) 
+  int numFixedArgs;
+  int hasFinalVarArg;
+  Instruction instructions[];
+} Function;
 
 typedef struct Values {
   int numValues;
@@ -101,7 +103,7 @@ typedef struct State {
 
 typedef struct Continuation {
   State nextState;
-  Continuation *next;
+  struct Continuation *next;
 } Continuation;
 
 #endif

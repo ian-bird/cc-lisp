@@ -31,10 +31,10 @@ Value lookup(Environment env, Symbol s)
 }
 
 #define REALLOC_FAM(old, structType, arrType, numMembers) \
-  (structType *)gc_realloc(old, sizeof(structType) + sizeof(arrType) * ((numMembers) - 1))
+  (structType *)gc_realloc(old, sizeof(structType) + sizeof(arrType) * ((numMembers) > 0 ? (numMembers) : 1 - 1))
 
 #define ALLOC_FAM(structType, arrType, numMembers) \
-  (structType *)gc_malloc(sizeof(structType) + sizeof(arrType) * ((numMembers) - 1))
+  (structType *)gc_malloc(sizeof(structType) + sizeof(arrType) * ((numMembers) > 0 ? (numMembers) : 1 - 1))
 
 Values *appendValue(Values *vs, Value v)
 {
@@ -96,15 +96,38 @@ Function *extend(Function *f, Values *vs)
   return result;
 }
 
+Values *setValues(Values *vs, int i, Value v)
+{
+  if(vs == NULL) 
+  {
+    Values *next = REALLOC_FAM(vs, Values, Value, INITIAL_ALLOC);
+    next->valueCapacity = INITIAL_ALLOC;
+    next->numValues = 0;
+    return setValues(next, i, v);
+  }
+  
+  if(i > vs->valueCapacity)
+  {
+    Values *next = REALLOC_FAM(vs, Values, Value, vs->valueCapacity * 2);
+    next->valueCapacity *= 2;
+    return setValues(next, i, v);
+  }
+
+  vs->values[i] = v;
+  return vs;
+}
+
 Value run(Value *initialArgs, int numInitialArgs, Function *toExecute) 
 {
+  // set up the state for evaluation
   State s;
+  s.current = NULL;
   for(int i = 0; i < numInitialArgs; i++) {
     s.current = appendValue(s.current, initialArgs[i]);
   }
   s.future = NULL;
 
-  Values *vs = ALLOC_FAM(Values, Value, numInitialArgs > 0 ? numInitialArgs : 1);
+  Values *vs = ALLOC_FAM(Values, Value, numInitialArgs);
   vs->numValues = numInitialArgs;
   vs->valueCapacity = numInitialArgs;
   memcpy(vs->values, initialArgs, numInitialArgs * sizeof(Value));
@@ -115,6 +138,7 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
   Continuation *k = gc_malloc(sizeof(Continuation));
    *k = (Continuation){(State){}, NULL};
 
+  // start evaluation
   while(!(s.fn->instructions[s.instruction].type == ret && k->next == NULL))
   {
     Instruction thisInstr = s.fn->instructions[s.instruction];
@@ -151,7 +175,7 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
 
       // move transfers the value in result into another register.
     case move:
-      s.current->values[thisInstr.val.move] = s.result;
+      s.current = setValues(s.current, thisInstr.val.move, s.result);
       break;
 
       // add arg takes a register and appends it into the future state.
@@ -166,7 +190,7 @@ Value run(Value *initialArgs, int numInitialArgs, Function *toExecute)
       {
         Procedure proc = s.current->values[thisInstr.val.arity].val.procedure;
         int numExpected = proc.type == continuation ? 1 : proc.val.function->numFixedArgs;
-        int isVarArg = proc.type == continuation ? 1 : proc.val.function->hasFinalVarArg;
+        int isVarArg = proc.type == continuation ? 0 : proc.val.function->hasFinalVarArg;
         if(!(s.future->numValues == numExpected || (s.future->numValues > numExpected && isVarArg)))
           longjmp(onErr, FAILED_ARITY_CHECK);
       }

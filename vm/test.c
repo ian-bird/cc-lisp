@@ -28,8 +28,13 @@ void impl() {
     toRun->varEnv->frames[0]->capacity = 2;
     toRun->varEnv->frames[0]->numBindings = 0;
 
-    toRun->instructions[0].type = ret;
-
+    toRun->instructions[0].type = load;
+    toRun->instructions[0].val.load.type = character;
+    toRun->instructions[0].val.load.val.character = 'a';
+    toRun->instructions[1].type = move;
+    toRun->instructions[1].val.move = 1;
+    toRun->instructions[2].type = ret;
+    
     run(NULL, 0, toRun);
 }
 

@@ -38,6 +38,11 @@ typedef struct Value {
       struct Value *car;
       struct Value *cdr;
     } pair;
+    char character;
+    struct {
+      struct Value *result;
+      Procedure procedure;
+    } promise;
   } val;
 } Value;
 
@@ -57,7 +62,20 @@ typedef struct Environment {
   Frame *frames[];
 } Environment;
 
-typedef enum InstructionType {varLookup, fnLookup, ret, load, move, addArg, arity, type, gosub, unless, jmp, makeClosure} InstructionType;
+typedef enum InstructionType {
+  varLookup,
+  fnLookup,
+  ret,
+  load,
+  move,
+  addArg,
+  arity,
+  type,
+  gosub,
+  unless,
+  jmp,
+  makeClosure
+} InstructionType;
 
 typedef int Register;
 

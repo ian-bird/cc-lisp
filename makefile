@@ -12,4 +12,4 @@ $(SUBDIRS):
 
 clean:
 	rm -f **/*.o
-	rm -f ./a.out
+	rm -f ./vm/a.out

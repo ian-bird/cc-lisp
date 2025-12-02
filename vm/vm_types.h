@@ -26,6 +26,28 @@ typedef struct Procedure {
   } val;
 } Procedure;
 
+typedef enum NumberType {fixnum, bignum, rational, imprecise} NumberType;
+
+typedef struct Bignum {
+  unsigned int num;
+  struct Bignum *next;
+} Bignum;
+
+typedef struct Number {
+  NumberType type;
+  unsigned char sign;
+  union {
+    int fixnum;
+    double imprecise;
+    struct Bignum *bignum;
+    struct {
+      struct Bignum *numerator;
+      struct Bignum *denominator;
+    } rational;
+  } val;
+} Number;
+  
+
 typedef enum ValueType {number, symbol, pair, boolean, character, procedure, promise, null} ValueType;
 
 typedef struct Value {
@@ -43,6 +65,7 @@ typedef struct Value {
       struct Value *result;
       Procedure procedure;
     } promise;
+    Number number;
   } val;
 } Value;
 
